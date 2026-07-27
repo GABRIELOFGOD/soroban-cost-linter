@@ -142,58 +142,60 @@ fn main() {
     let reader = BufReader::new(stdout);
     let mut highest_exit_code = 0;
 
-    for line_str in reader.lines().map_while(Result::ok) {
-        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line_str) {
-            if msg.get("reason").and_then(|r| r.as_str()) == Some("compiler-message") {
-                if let Some(message) = msg.get("message") {
-                    if let Some(code) = message.get("code") {
+    for line in reader.lines().map_while(Result::ok) {
+        if let Ok(cargo_record) = serde_json::from_str::<serde_json::Value>(&line) {
+            if cargo_record.get("reason").and_then(|r| r.as_str()) == Some("compiler-message") {
+                if let Some(diagnostic) = cargo_record.get("message") {
+                    if let Some(code) = diagnostic.get("code") {
                         if let Some(lint_name) = code.get("code").and_then(|c| c.as_str()) {
                             if LINT_NAMES.contains(&lint_name) {
-                                let level = message
+                                let level = diagnostic
                                     .get("level")
                                     .and_then(|l| l.as_str())
                                     .unwrap_or("unknown");
 
-                                let msg_text = message
+                                let diagnostic_message = diagnostic
                                     .get("message")
                                     .and_then(|m| m.as_str())
                                     .unwrap_or("");
                                 let mut file = String::new();
-                                let mut span_obj = Span {
+                                let mut primary_span = Span {
                                     line_start: 0,
                                     line_end: 0,
                                     column_start: 0,
                                     column_end: 0,
                                 };
 
-                                if let Some(spans) = message.get("spans").and_then(|s| s.as_array())
+                                if let Some(spans) =
+                                    diagnostic.get("spans").and_then(|s| s.as_array())
                                 {
-                                    for s in spans {
-                                        if s.get("is_primary")
+                                    for span in spans {
+                                        if span
+                                            .get("is_primary")
                                             .and_then(|p| p.as_bool())
                                             .unwrap_or(false)
                                         {
-                                            file = s
+                                            file = span
                                                 .get("file_name")
                                                 .and_then(|f| f.as_str())
                                                 .unwrap_or("")
                                                 .to_string();
-                                            span_obj.line_start = s
+                                            primary_span.line_start = span
                                                 .get("line_start")
                                                 .and_then(|l| l.as_u64())
                                                 .unwrap_or(0)
                                                 as usize;
-                                            span_obj.line_end = s
+                                            primary_span.line_end = span
                                                 .get("line_end")
                                                 .and_then(|l| l.as_u64())
                                                 .unwrap_or(0)
                                                 as usize;
-                                            span_obj.column_start = s
+                                            primary_span.column_start = span
                                                 .get("column_start")
                                                 .and_then(|c| c.as_u64())
                                                 .unwrap_or(0)
                                                 as usize;
-                                            span_obj.column_end = s
+                                            primary_span.column_end = span
                                                 .get("column_end")
                                                 .and_then(|c| c.as_u64())
                                                 .unwrap_or(0)
@@ -214,7 +216,7 @@ fn main() {
                                 if cli.format == OutputFormat::Json {
                                     let mut help_text = None;
                                     if let Some(children) =
-                                        message.get("children").and_then(|c| c.as_array())
+                                        diagnostic.get("children").and_then(|c| c.as_array())
                                     {
                                         for child_item in children {
                                             if child_item.get("level").and_then(|l| l.as_str())
@@ -233,8 +235,8 @@ fn main() {
                                         name: lint_name.to_string(),
                                         level: level.to_string(),
                                         file,
-                                        span: span_obj,
-                                        message: msg_text.to_string(),
+                                        span: primary_span,
+                                        message: diagnostic_message.to_string(),
                                         help: help_text,
                                     };
 
@@ -242,10 +244,10 @@ fn main() {
                                         println!("{}", json_str);
                                     }
                                 } else {
-                                    let rendered = message
+                                    let rendered = diagnostic
                                         .get("rendered")
                                         .and_then(|r| r.as_str())
-                                        .unwrap_or(msg_text);
+                                        .unwrap_or(diagnostic_message);
                                     print!("{}", rendered);
                                 }
                             }
